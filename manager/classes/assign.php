@@ -1,11 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth_check.php';
 require_once __DIR__ . '/../../config/session.php';
-
-// Helper function to retrieve flash messages
-function flashMessage($session, $key) {
-    return $session->getFlash($key);
-}
 require_once __DIR__ . '/../../config/database.php';
 
 // Manual role check if requireRole() isn't available
@@ -20,6 +15,14 @@ if ($session->get('user_role') !== 'manager') {
     die('You do not have permission to access this page.');
 }
 
+// Get class ID from request
+$classId = $_GET['class_id'] ?? null;
+
+if (!$classId) {
+    $_SESSION['flash_error'] = 'No class ID provided.';
+    header("Location: manage.php");
+    exit();
+}
 
 // Get class details
 $classStmt = $db->prepare("
@@ -31,23 +34,12 @@ $classStmt = $db->prepare("
 ");
 $classStmt->execute([$classId]);
 $class = $classStmt->fetch();
- 
-
-$classId = $_GET['class_id'] ?? null;
-
-if (!$classId) {
-    $session->set('flash_error', 'No class ID provided.');
-    header("Location: manage.php");
-    exit();
-}
-
-
 
 // Get all subjects
 $subjects = $db->query("SELECT * FROM subjects ORDER BY subject_name")->fetchAll();
 
 // Get current class subjects with teacher assignments
-$classSubjects = $db->prepare("
+$classSubjectsStmt = $db->prepare("
     SELECT cs.*, s.subject_name, CONCAT(u.first_name, ' ', u.last_name) as teacher_name
     FROM class_subjects cs
     JOIN subjects s ON cs.subject_id = s.subject_id
@@ -94,12 +86,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$classId, $subjectId, $teacherId]);
             
             $db->commit();
-            $session->set('flash_success', 'Subject assigned successfully');
+            $_SESSION['flash_success'] = 'Subject assigned successfully';
             header("Location: assign.php?class_id=$classId");
             exit();
         } catch (Exception $e) {
             $db->rollBack();
-            $session->set('flash_error', $e->getMessage());
+            $_SESSION['flash_error'] = $e->getMessage();
             header("Location: assign.php?class_id=$classId");
             exit();
         }
@@ -118,53 +110,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             
             $db->commit();
-            $session->set('flash_success', 'Subject assignments updated successfully');
+            $_SESSION['flash_success'] = 'Subject assignments updated successfully';
             header("Location: assign.php?class_id=$classId");
             exit();
         } catch (Exception $e) {
             $db->rollBack();
-            $session->set('flash_error', 'Error updating assignments: ' . $e->getMessage());
+            $_SESSION['flash_error'] = 'Error updating assignments: ' . $e->getMessage();
             header("Location: assign.php?class_id=$classId");
             exit();
         }
-    } elseif (isset($_GET['delete_assignment'])) {
-        // Remove subject from class
-        $assignmentId = (int)$_GET['delete_assignment'];
+    }
+}
+
+// Handle subject removal
+if (isset($_GET['delete_assignment'])) {
+    // Remove subject from class
+    $assignmentId = (int)$_GET['delete_assignment'];
+    
+    try {
+        $db->beginTransaction();
         
-        try {
-            $db->beginTransaction();
-            
-            // Check if there are grades for this subject
-            $stmt = $db->prepare("
-                SELECT COUNT(*) 
-                FROM grades g
-                JOIN assignments a ON g.assignment_id = a.assignment_id
-                WHERE a.class_subject_id = ?
-            ");
-            $stmt->execute([$assignmentId]);
-            
-            if ($stmt->fetchColumn() > 0) {
-                throw new Exception("Cannot remove subject with existing grades");
-            }
-            
-            // Delete assignments first
-            $stmt = $db->prepare("DELETE FROM assignments WHERE class_subject_id = ?");
-            $stmt->execute([$assignmentId]);
-            
-            // Then delete the class subject
-            $stmt = $db->prepare("DELETE FROM class_subjects WHERE id = ?");
-            $stmt->execute([$assignmentId]);
-            
-            $db->commit();
-            $session->set('flash_success', 'Subject removed from class');
-            header("Location: assign.php?class_id=$classId");
-            exit();
-        } catch (Exception $e) {
-            $db->rollBack();
-            $session->set('flash_error', $e->getMessage());
-            header("Location: assign.php?class_id=$classId");
-            exit();
+        // Check if there are grades for this subject
+        $stmt = $db->prepare("
+            SELECT COUNT(*) 
+            FROM grades g
+            JOIN assignments a ON g.assignment_id = a.assignment_id
+            WHERE a.class_subject_id = ?
+        ");
+        $stmt->execute([$assignmentId]);
+        
+        if ($stmt->fetchColumn() > 0) {
+            throw new Exception("Cannot remove subject with existing grades");
         }
+        
+        // Delete assignments first
+        $stmt = $db->prepare("DELETE FROM assignments WHERE class_subject_id = ?");
+        $stmt->execute([$assignmentId]);
+        
+        // Then delete the class subject
+        $stmt = $db->prepare("DELETE FROM class_subjects WHERE id = ?");
+        $stmt->execute([$assignmentId]);
+        
+        $db->commit();
+        $_SESSION['flash_success'] = 'Subject removed from class';
+        header("Location: assign.php?class_id=$classId");
+        exit();
+    } catch (Exception $e) {
+        $db->rollBack();
+        $_SESSION['flash_error'] = $e->getMessage();
+        header("Location: assign.php?class_id=$classId");
+        exit();
     }
 }
 
@@ -188,12 +183,15 @@ if ($classSubjects) {
     <title>Assign Subjects | Iftin School</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="../../assets/css/sidebar.css">
 </head>
 <body>
-<?php include './others/navbar.php'; ?>    
+<?php include '../others/navbar.php'; ?>    
+<?php include '../others/sidebar.php'; ?>
+<div class="main-content-teacher">
     <div class="container-fluid">
         <div class="row">
-            <?php include __DIR__ . '../others/sidebar.php'; ?>
+            
             
             <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
                 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
@@ -207,11 +205,14 @@ if ($classSubjects) {
                     </div>
                 </div>
 
-                <?php if ($message = flashMessage($session, 'success')): ?>
-                    <div class="alert alert-success"><?= htmlspecialchars($message) ?></div>
+                <?php if (isset($_SESSION['flash_success'])): ?>
+                    <div class="alert alert-success"><?= htmlspecialchars($_SESSION['flash_success']) ?></div>
+                    <?php unset($_SESSION['flash_success']); ?>
                 <?php endif; ?>
-                <?php if ($message = flashMessage($session, 'error')): ?>
-                    <div class="alert alert-danger"><?= htmlspecialchars($message) ?></div>
+                
+                <?php if (isset($_SESSION['flash_error'])): ?>
+                    <div class="alert alert-danger"><?= htmlspecialchars($_SESSION['flash_error']) ?></div>
+                    <?php unset($_SESSION['flash_error']); ?>
                 <?php endif; ?>
 
                 <div class="card mb-4">
@@ -310,7 +311,7 @@ if ($classSubjects) {
             </main>
         </div>
     </div>
-
+</div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

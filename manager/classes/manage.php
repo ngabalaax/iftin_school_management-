@@ -157,10 +157,12 @@ if (isset($_GET['edit'])) {
     <link href="../../assets/css/sidebar.css" rel="stylesheet">
 </head>
 <body>
-<?php include './others/navbar.php'; ?>
+<?php include '../others/navbar.php'; ?>
+<?php include '../others/sidebar.php'; ?>
+    <div class="main-content-teacher">
 <div class="container-fluid">
         <div class="row">
-            <?php include __DIR__ . '/../others/sidebar.php'; ?>
+           
             
             <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
                 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
@@ -220,6 +222,9 @@ if (isset($_GET['edit'])) {
             </main>
         </div>
     </div>
+
+</div>
+
 
     <!-- Class Modal -->
     <div class="modal fade" id="classModal" tabindex="-1" aria-labelledby="classModalLabel" aria-hidden="true">
